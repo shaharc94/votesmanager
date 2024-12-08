@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>דירוג הצעות</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        body {
+            background-color: #f5f5f5;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .proposal {
+            background-color: #f8f9fa;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .proposal.voting-closed {
+            opacity: 0.7;
+        }
+
+        .proposal.voting-closed .stars {
+            pointer-events: none;
+        }
+
+        .stars {
+            display: flex;
+            gap: 4px;
+        }
+
+        .star {
+            cursor: pointer;
+            font-size: 24px;
+            color: #ddd;
+            transition: color 0.2s;
+        }
+
+        .star.active {
+            color: #ffd700;
+        }
+
+        .admin-controls {
+            margin: 2rem 0;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+
+        .voting-status {
+            text-align: center;
+            padding: 0.5rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        .voting-status.open {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .voting-status.closed {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .add-proposal {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 1px solid #eee;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.5rem;
+            margin: 0.5rem 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            font-size: 1rem;
+            margin-top: 0.5rem;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #0052a3;
+        }
+
+        button.toggle-voting {
+            background-color: #28a745;
+        }
+
+        button.toggle-voting.closed {
+            background-color: #dc3545;
+        }
+
+        .error-message {
+            display: none;
+            color: red;
+            text-align: center;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>דירוג הצעות</h1>
+        
+        <div class="voting-status" id="voting-status"></div>
+        
+        <div class="admin-controls">
+            <h2>ניהול הצבעות</h2>
+            <input type="password" id="voting-admin-code" placeholder="קוד מנהל">
+            <button id="toggle-voting-btn" onclick="toggleVoting()">טוען...</button>
+            <div id="error-message" class="error-message"></div>
+        </div>
+
+        <div id="proposals-list"></div>
+        
+        <div class="add-proposal">
+            <h2>הוספת הצעה חדשה</h2>
+            <input type="text" id="new-proposal" placeholder="הכנס הצעה חדשה">
+            <input type="password" id="admin-code" placeholder="קוד מנהל">
+            <button onclick="addProposal()">הוסף הצעה</button>
+            <div id="add-error" class="error-message">קוד מנהל שגוי או הצעה ריקה</div>
+        </div>
+    </div>
+
+    <script>
+        // הצפנת קוד המנהל
+        const ADMIN_CODE_HASH = '96db2c156a5c8a7da07d9bb19c91ad2a4c91d54be8c1adf721366ccf597e92f5'; // הצפנה של 1627
+        
+        let proposals = [
+            { id: 1, text: "הצעה ראשונה", rating: 0 },
+            { id: 2, text: "הצעה שנייה", rating: 0 },
+            { id: 3, text: "הצעה שלישית", rating: 0 }
+        ];
+
+        let isVotingOpen = true;
+
+        function updateVotingStatus() {
+            const statusElement = document.getElementById('voting-status');
+            const toggleButton = document.getElementById('toggle-voting-btn');
+            
+            statusElement.className = `voting-status ${isVotingOpen ? 'open' : 'closed'}`;
+            statusElement.textContent = isVotingOpen ? '🟢 ההצבעות פתוחות' : '🔴 ההצבעות סגורות';
+            
+            toggleButton.textContent = isVotingOpen ? 'סגור הצבעות' : 'פתח הצבעות';
+            toggleButton.className = `toggle-voting ${isVotingOpen ? '' : 'closed'}`;
+        }
+
+        function showErrorMessage(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        function toggleVoting() {
+            const adminCode = document.getElementById('voting-admin-code').value;
+            const hashedInput = CryptoJS.SHA256(adminCode).toString();
+            
+            if (hashedInput === ADMIN_CODE_HASH) {
+                isVotingOpen = !isVotingOpen;
+                document.getElementById('voting-admin-code').value = '';
+                updateVotingStatus();
+                renderProposals();
+            } else {
+                showErrorMessage('קוד מנהל שגוי');
+            }
+        }
+
+        function renderProposals() {
+            const container = document.getElementById('proposals-list');
+            proposals.sort((a, b) => b.rating - a.rating);
+            container.innerHTML = proposals.map(proposal => `
+                <div class="proposal ${!isVotingOpen ? 'voting-closed' : ''}">
+                    <span>${proposal.text}</span>
+                    <div class="stars" data-id="${proposal.id}">
+                        ${Array.from({length: 5}, (_, i) => `
+                            <span class="star ${i < proposal.rating ? 'active' : ''}" 
+                                  onclick="rate(${proposal.id}, ${i + 1})">★</span>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function rate(id, rating) {
+            if (!isVotingOpen) {
+                showErrorMessage('ההצבעות סגורות כרגע');
+                return;
+            }
+            
+            const proposal = proposals.find(p => p.id === id);
+            if (proposal) {
+                proposal.rating = rating;
+                renderProposals();
+            }
+        }
+
+        function addProposal() {
+            const newProposal = document.getElementById('new-proposal').value.trim();
+            const adminCode = document.getElementById('admin-code').value;
+            const error = document.getElementById('add-error');
+            
+            const hashedInput = CryptoJS.SHA256(adminCode).toString();
+            
+            if (hashedInput === ADMIN_CODE_HASH && newProposal) {
+                const newId = Math.max(...proposals.map(p => p.id)) + 1;
+                proposals.push({ id: newId, text: newProposal, rating: 0 });
+                document.getElementById('new-proposal').value = '';
+                document.getElementById('admin-code').value = '';
+                error.style.display = 'none';
+                renderProposals();
+            } else {
+                error.style.display = 'block';
+            }
+        }
+
+        updateVotingStatus();
+        renderProposals();
+    </script>
+</body>
+</html>
